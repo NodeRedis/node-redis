@@ -354,6 +354,9 @@ tests.MULTI_6 = function () {
             things: "here"
         })
         .hgetall("multihash")
+        .zadd('z1', 1, 'a', 2, 'b', 3, 'c')
+        .zrange('z1', 0, -1, 'wIthScoRES')
+        .zrange('z1', 0, -1)
         .exec(function (err, replies) {
             assert.strictEqual(null, err);
             assert.equal("OK", replies[0]);
@@ -362,6 +365,15 @@ tests.MULTI_6 = function () {
             assert.equal("1", replies[2].b);
             assert.equal("fancy", replies[2].extra);
             assert.equal("here", replies[2].things);
+            assert.strictEqual(3, replies[3]);
+            assert.strictEqual(3, Object.keys(replies[4]).length);
+            assert.equal('1', replies[4].a);
+            assert.equal('2', replies[4].b);
+            assert.equal('3', replies[4].c);
+            assert.strictEqual(3, replies[5].length);
+            assert.equal('a', replies[5][0]);
+            assert.equal('b', replies[5][1]);
+            assert.equal('c', replies[5][2]);
             next(name);
         });
 };
@@ -535,6 +547,51 @@ tests.EVAL_1 = function () {
         assert.strictEqual("c", res[2], name);
         assert.strictEqual("d", res[3], name);
     });
+    
+    //test {EVAL - Allow variadic KEYS and ARGS to be passed to script}
+    client.eval("return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", ["a", "b"], ["c", "d"], function (err, res) {
+        assert.strictEqual(4, res.length, name);
+        assert.strictEqual("a", res[0], name);
+        assert.strictEqual("b", res[1], name);
+        assert.strictEqual("c", res[2], name);
+        assert.strictEqual("d", res[3], name);
+    });
+    
+     //test {EVAL - Allow variadic KEYS and ARGS to be passed to script in array format}
+    client.eval(["return {KEYS[1],KEYS[2],ARGV[1],ARGV[2]}", ["a", "b"], ["c", "d"]], function (err, res) {
+        assert.strictEqual(4, res.length, name);
+        assert.strictEqual("a", res[0], name);
+        assert.strictEqual("b", res[1], name);
+        assert.strictEqual("c", res[2], name);
+        assert.strictEqual("d", res[3], name);
+    });
+    
+    //test {EVAL - Script with no arguments}
+    client.eval("return 1", function (err, res) {
+        assert.strictEqual(1, res, name);
+    });
+    
+    //test {EVAL - Script with no arguments in array format}
+    client.eval(["return 1"], function (err, res) {
+        assert.strictEqual(1, res, name);
+    });
+    
+    //test {EVAL - Script with only KEYS}
+    client.eval("return {KEYS[1], KEYS[2]}", ["key1", "key2"], function (err, res) {
+        assert.strictEqual(2, res.length, name);
+        assert.strictEqual(res[0], "key1", name);
+        assert.strictEqual(res[1], "key2", name);
+    });
+    
+    //test {EVAL - Script with only KEYS in array format}
+    client.eval(["return {KEYS[1], KEYS[2]}", ["key1", "key2"]], function (err, res) {
+        assert.strictEqual(2, res.length, name);
+        assert.strictEqual(res[0], "key1", name);
+        assert.strictEqual(res[1], "key2", name);
+    });
+    
+    
+    
 
     // prepare sha sum for evalsha cache test
     var source = "return redis.call('get', 'sha test')",
@@ -1819,12 +1876,57 @@ tests.SUNIONSTORE = function () {
 
     client.smembers('foo', function (err, members) {
         if (err) {
-            assert.fail(err, name);
+        	assert.fail(err, name);
         }
         assert.equal(members.length, 5, name);
         assert.deepEqual(buffers_to_strings(members).sort(), ['a', 'b', 'c', 'd', 'e'], name);
         next(name);
     });
+};
+
+tests.ZRANGE = function () {
+	var name = 'ZRANGE/ZREVRANGE WITHSCORES';
+	
+	client.zadd('zrange test', 1, 'a', 2, 'b', 3, 'c', 4, 'd');
+	
+	function zassert (err, obj) {
+		assert.strictEqual(null, err, name + " result sent back unexpected error: " + err);
+		assert.strictEqual(4, Object.keys(obj).length, name);
+	    assert.strictEqual('1', obj.a, name);
+	    assert.strictEqual('2', obj.b, name);
+	    assert.strictEqual('3', obj.c, name);
+	    assert.strictEqual('4', obj.d, name);
+	}
+	client.zrange('zrange test', 0, -1, 'WITHSCORES', function (err, obj) {
+		zassert(err, obj);
+		client.zrevrange('zrange test', 0, -1, 'WITHSCORES', function (err, obj1) {
+			zassert(err, obj1);
+			next(name);
+		});
+	});
+	
+};
+
+tests.ZRANGE_2 = function () {
+	var name = 'ZRANGE/ZREVRANGE WITHOUT SCORES';
+	client.zadd('zrange test2', 1, 'a', 2, 'b', 3, 'c', 4, 'd');
+	
+	function zassert(err, array) {
+		assert.strictEqual(null, err, name + " result sent back unexpected error: " + err);
+		assert.strictEqual(4, array.length, name);
+	    assert.strictEqual('a', array[0], name);
+	    assert.strictEqual('b', array[1], name);
+	    assert.strictEqual('c', array[2], name);
+	    assert.strictEqual('d', array[3], name);
+	}
+	
+	client.zrange('zrange test2', 0, -1, function (err, array) {
+		zassert(err, array);
+		client.zrevrange('zrange test2', 0, -1, function (err, array) {
+			zassert(err, array.sort());
+			next(name);
+		});
+	});
 };
 
 // SORT test adapted from Brian Hammond's redis-node-client.js, which has a comprehensive test suite

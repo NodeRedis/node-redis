@@ -678,7 +678,7 @@ RedisClient.prototype.return_reply = function (reply) {
             }
 
             // TODO - confusing and error-prone that hgetall is special cased in two places
-            if (reply && 'hgetall' === command_obj.command.toLowerCase()) {
+            if (reply && command_obj.replyWithObject()) {
                 reply = reply_to_object(reply);
             }
 
@@ -738,6 +738,21 @@ function Command(command, args, sub_command, buffer_args, callback) {
     this.sub_command = sub_command;
     this.buffer_args = buffer_args;
     this.callback = callback;
+}
+
+Command.replyWithObject = function (command, args) {
+	switch(command.toLowerCase()) {
+		case 'hgetall':
+			return true;
+		case 'zrange':
+		case 'zrevrange':
+			return /withscores/i.test(args[args.length - 1]);
+		}
+	return false;
+};
+
+Command.prototype.replyWithObject = function () {
+	return Command.replyWithObject(this.command, this.args);
 }
 
 RedisClient.prototype.send_command = function (command, args, callback) {
@@ -1156,7 +1171,7 @@ Multi.prototype.exec = function (callback) {
                 args = self.queue[i];
 
                 // TODO - confusing and error-prone that hgetall is special cased in two places
-                if (reply && args[0].toLowerCase() === "hgetall") {
+                if (reply && Command.replyWithObject(args[0], args.slice(1))) {
                     replies[i - 1] = reply = reply_to_object(reply);
                 }
 
@@ -1200,6 +1215,19 @@ RedisClient.prototype.eval = RedisClient.prototype.EVAL = function () {
     // replace script source with sha value
     var source = args[0];
     args[0] = crypto.createHash("sha1").update(source).digest("hex");
+    
+    var arity = args.length,
+    	keys = args[1],
+    	luaArgs = args[2];
+    
+    if (arity === 1) { //Script with no args => EVIL. A Redis Cluster must know the KEYS a script will be manipulating
+    	args.push(0); //redis.eval(script) => EVAL script 0
+    } else if (Array.isArray(keys)) {
+    	args = [args[0], keys.length].concat(keys); //redis.eval(script, keys3) => EVAL script 3 key1 key2 key3
+    	if (Array.isArray(luaArgs)) {
+    		args = args.concat(luaArgs); //redis.eval(script, keys3, luaArgs2) => EVAL script 3 key1 key2 key3 lua1 lua2
+    	}
+    }
 
     self.evalsha(args, function (err, reply) {
         if (err && /NOSCRIPT/.test(err.message)) {
