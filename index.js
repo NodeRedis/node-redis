@@ -31,6 +31,8 @@ function handle_detect_buffers_reply (reply, command, buffer_args) {
 
     if (command === 'hgetall') {
         reply = utils.reply_to_object(reply);
+    } else if (command === 'hscan') {
+        reply[1] = utils.reply_to_object(reply[1]);
     }
     return reply;
 }
@@ -253,6 +255,8 @@ RedisClient.prototype.create_stream = function () {
 RedisClient.prototype.handle_reply = function (reply, command) {
     if (command === 'hgetall') {
         reply = utils.reply_to_object(reply);
+    } else if (command === 'hscan') {
+        reply[1] = utils.reply_to_object(reply[1]);
     }
     return reply;
 };
