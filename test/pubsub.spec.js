@@ -493,18 +493,19 @@ describe('publish/subscribe', function () {
                     });
                     sub2.on('ready', function () {
                         sub2.batch().psubscribe('*', helper.isString('*')).exec();
-                        sub2.subscribe('/foo');
+                        sub2.subscribe('/foo', function () {
+                            pub.pubsub('numsub', '/foo', function (err, res) {
+                                assert.deepEqual(res, ['/foo', 2]);
+                            });
+                            // sub2 is counted twice as it subscribed with psubscribe and subscribe
+                            pub.publish('/foo', 'hello world', helper.isNumber(3));
+                        });
                         sub2.on('pmessage', function (pattern, channel, message) {
                             assert.strictEqual(pattern.inspect(), Buffer.from('*').inspect());
                             assert.strictEqual(channel.inspect(), Buffer.from('/foo').inspect());
                             assert.strictEqual(message.inspect(), Buffer.from('hello world').inspect());
                             sub2.quit(done);
                         });
-                        pub.pubsub('numsub', '/foo', function (err, res) {
-                            assert.deepEqual(res, ['/foo', 2]);
-                        });
-                        // sub2 is counted twice as it subscribed with psubscribe and subscribe
-                        pub.publish('/foo', 'hello world', helper.isNumber(3));
                     });
                 });
 

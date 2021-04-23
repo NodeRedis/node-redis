@@ -912,7 +912,9 @@ describe('The node_redis client', function () {
                             }
                             multi.exec();
                             assert.equal(client.command_queue_length, 15);
-                            helper.killConnection(client);
+                            process.nextTick(function () {
+                                helper.killConnection(client);
+                            });
                         });
 
                         var end = helper.callFuncAfter(done, 3);
@@ -1006,7 +1008,9 @@ describe('The node_redis client', function () {
                             }
                             multi.exec();
                             assert.equal(client.command_queue.length, 15);
-                            helper.killConnection(client);
+                            process.nextTick(function () {
+                                helper.killConnection(client);
+                            });
                         });
 
                         var end = helper.callFuncAfter(done, 3);
