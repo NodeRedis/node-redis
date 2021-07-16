@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { once } from 'events';
 import { itWithClient, TEST_REDIS_SERVERS, TestRedisServers, waitTillBeenCalled, isRedisVersionGreaterThan } from './test-utils';
-import RedisClient from './client';
+import RedisClient, { RedisClientLegacyModes } from './client';
 import { AbortError } from './errors';
 import { defineScript } from './lua-script';
 import { spy } from 'sinon';
@@ -26,7 +26,7 @@ describe('Client', () => {
             await assert.rejects(
                 client.connect(),
                 {
-                    
+
                     message: isRedisVersionGreaterThan([6]) ?
                         'WRONGPASS invalid username-password pair or user is disabled.' :
                         'ERR invalid password'
@@ -38,181 +38,333 @@ describe('Client', () => {
     });
 
     describe('legacyMode', () => {
-        const client = RedisClient.create({
-            socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
-            modules: {
-                testModule: {
-                    echo: {
-                        transformArguments(message: string): Array<string> {
-                            return ['ECHO', message];
-                        },
-                        transformReply(reply: string): string {
-                            return reply;
+        describe('Mode testing', () => {
+            it('legacyMode=off throws on .v4 usage', async () => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
+                        }
+                    },
+                    legacyMode: RedisClientLegacyModes.off
+                });
+
+                assert.throws(() => { client.v4.PING() });
+            });
+
+            it('legacyMode=undefined throws on .v4 usage', async () => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
                         }
                     }
-                }
-            },
-            legacyMode: true
-        });
+                });
 
-        before(() => client.connect());
-        afterEach(() => client.v4.flushAll());
-        after(() => client.disconnect());
+                assert.throws(() => { client.v4.PING() });
+            })
 
-        it('client.sendCommand should call the callback', done => {
-            (client as any).sendCommand('PING', (err?: Error, reply?: string) => {
-                if (err) {
-                    return done(err);
-                }
+            it('legacyMode=off throws on attempted callback', (done) => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
+                        }
+                    },
+                    legacyMode: RedisClientLegacyModes.off
+                });
 
-                try {
-                    assert.equal(reply, 'PONG');
-                    done();
-                } catch (err) {
-                    done(err);
-                }
+                client.once("error", (...args) => {
+                    if (args[0] == "Legacy command detected. See https://github.com/NodeRedis/node-redis/tree/v4#legacy-mode")
+                        done();
+                })
+
+                assert.throws(() => {
+                    (client as any).sendCommand(["echo", "test", (error: any, reply: any) => { return; }])
+                });
             });
-        });
 
-        it('client.sendCommand should work without callback', async () => {
-            (client as any).sendCommand('PING');
-            await client.v4.ping(); // make sure the first command was replied
-        });
+            it('legacyMode=undefined throws on attempted callback', (done) => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
+                        }
+                    }
+                });
 
-        it('client.v4.sendCommand should return a promise', async () => {
-            assert.equal(
-                await client.v4.sendCommand(['PING']),
-                'PONG'
-            );
-        });
+                client.once("error", (...args) => {
+                    if (args[0] == "Legacy command detected. See https://github.com/NodeRedis/node-redis/tree/v4#legacy-mode")
+                        done();
+                })
 
-        it('client.{command} should accept vardict arguments', done => {
-            (client as any).set('a', 'b', (err?: Error, reply?: string) => {
-                if (err) {
-                    return done(err);
-                }
-
-                try {
-                    assert.equal(reply, 'OK');
-                    done();
-                } catch (err) {
-                    done(err);
-                }
+                assert.throws(() => {
+                    (client as any).sendCommand(["echo", "test", (error: any, reply: any) => { return; }])
+                });
             });
-        });
 
-        it('client.{command} should accept arguments array', done => {
-            (client as any).set(['a', 'b'], (err?: Error, reply?: string) => {
-                if (err) {
-                    return done(err);
-                }
+            it('legacyMode=warn warns', async (done) => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
+                        }
+                    },
+                    legacyMode: RedisClientLegacyModes.warn
+                });
 
-                try {
-                    assert.equal(reply, 'OK');
+                client.once('warning', () => {
                     done();
-                } catch (err) {
-                    done(err);
-                }
+                });
+
+                (client as any).sendCommand('PING', (error: any, reply: any) => { return });
             });
-        });
 
-        it('client.{command} should accept mix of strings and array of strings', done => {
-            (client as any).set(['a'], 'b', ['XX'], (err?: Error, reply?: string) => {
-                if (err) {
-                    return done(err);
-                }
+            it('legacyMode=nowarn doesn\'t warn', async () => {
+                const client = RedisClient.create({
+                    socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                    modules: {
+                        testModule: {
+                            echo: {
+                                transformArguments(message: string): Array<string> {
+                                    return ['ECHO', message];
+                                },
+                                transformReply(reply: string): string {
+                                    return reply;
+                                }
+                            }
+                        }
+                    },
+                    legacyMode: RedisClientLegacyModes.nowarn
+                });
 
-                try {
-                    assert.equal(reply, null);
-                    done();
-                } catch (err) {
-                    done(err);
-                }
+                let warned = false;
+
+                client.once('warning', () => {
+                    warned = true;
+                });
+
+                (client as any).sendCommand('PING', (error: any, reply: any) => { assert(warned == false, "Warning was emitted") });
             });
-        });
+        })
 
-        it('client.multi.ping.exec should call the callback', done => {
-            (client as any).multi()
-                .ping()
-                .exec((err?: Error, reply?: string) => {
+        describe('Behaviour Testing', () => {
+            const client = RedisClient.create({
+                socket: TEST_REDIS_SERVERS[TestRedisServers.OPEN],
+                modules: {
+                    testModule: {
+                        echo: {
+                            transformArguments(message: string): Array<string> {
+                                return ['ECHO', message];
+                            },
+                            transformReply(reply: string): string {
+                                return reply;
+                            }
+                        }
+                    }
+                },
+                legacyMode: RedisClientLegacyModes.nowarn
+            });
+
+            before(() => client.connect());
+            afterEach(() => client.v4.flushAll());
+            after(() => client.disconnect());
+
+            it('client.sendCommand should call the callback', done => {
+                (client as any).sendCommand('PING', (err?: Error, reply?: string) => {
                     if (err) {
                         return done(err);
                     }
 
                     try {
-                        assert.deepEqual(reply, ['PONG']);
+                        assert.equal(reply, 'PONG');
                         done();
                     } catch (err) {
                         done(err);
                     }
                 });
-        });
+            });
 
-        it('client.multi.ping.exec should work without callback', async () => {
-            (client as any).multi()
-                .ping()
-                .exec();
-            await client.v4.ping(); // make sure the first command was replied
-        });
+            it('client.sendCommand should work without callback', async () => {
+                (client as any).sendCommand('PING');
+                await client.v4.ping(); // make sure the first command was replied
+            });
 
-        it('client.multi.ping.v4.ping.v4.exec should return a promise', async () => {
-            assert.deepEqual(
-                await ((client as any).multi()
+            it('client.v4.sendCommand should return a promise', async () => {
+                assert.equal(
+                    await client.v4.sendCommand(['PING']),
+                    'PONG'
+                );
+            });
+
+            it('client.{command} should accept vardict arguments', done => {
+                (client as any).set('a', 'b', (err?: Error, reply?: string) => {
+                    if (err) {
+                        return done(err);
+                    }
+
+                    try {
+                        assert.equal(reply, 'OK');
+                        done();
+                    } catch (err) {
+                        done(err);
+                    }
+                });
+            });
+
+            it('client.{command} should accept arguments array', done => {
+                (client as any).set(['a', 'b'], (err?: Error, reply?: string) => {
+                    if (err) {
+                        return done(err);
+                    }
+
+                    try {
+                        assert.equal(reply, 'OK');
+                        done();
+                    } catch (err) {
+                        done(err);
+                    }
+                });
+            });
+
+            it('client.{command} should accept mix of strings and array of strings', done => {
+                (client as any).set(['a'], 'b', ['XX'], (err?: Error, reply?: string) => {
+                    if (err) {
+                        return done(err);
+                    }
+
+                    try {
+                        assert.equal(reply, null);
+                        done();
+                    } catch (err) {
+                        done(err);
+                    }
+                });
+            });
+
+            it('client.multi.ping.exec should call the callback', done => {
+                (client as any).multi()
                     .ping()
-                    .v4.ping()
-                    .v4.exec()),
-                ['PONG', 'PONG']
-            );
-        });
-        
-        it('client.testModule.echo should call the callback', done => {
-            (client as any).testModule.echo('message', (err?: Error, reply?: string) => {
-                if (err) {
-                    return done(err);
-                }
+                    .exec((err?: Error, reply?: string) => {
+                        if (err) {
+                            return done(err);
+                        }
 
-                try {
-                    assert.deepEqual(reply, 'message');
-                    done();
-                } catch (err) {
-                    done(err);
-                }
+                        try {
+                            assert.deepEqual(reply, ['PONG']);
+                            done();
+                        } catch (err) {
+                            done(err);
+                        }
+                    });
             });
-        });
 
-        it('client.v4.testModule.echo should return a promise', async () => {
-            assert.equal(
-                await (client as any).v4.testModule.echo('message'),
-                'message'
-            );
-        });
-        
-        it('client.multi.testModule.echo.v4.testModule.echo.exec should call the callback', done => {
-            (client as any).multi()
-                .testModule.echo('message')
-                .v4.testModule.echo('message')
-                .exec((err?: Error, replies?: Array<string>) => {
+            it('client.multi.ping.exec should work without callback', async () => {
+                (client as any).multi()
+                    .ping()
+                    .exec();
+                await client.v4.ping(); // make sure the first command was replied
+            });
+
+            it('client.multi.ping.v4.ping.v4.exec should return a promise', async () => {
+                assert.deepEqual(
+                    await ((client as any).multi()
+                        .ping()
+                        .v4.ping()
+                        .v4.exec()),
+                    ['PONG', 'PONG']
+                );
+            });
+
+            it('client.testModule.echo should call the callback', done => {
+                (client as any).testModule.echo('message', (err?: Error, reply?: string) => {
                     if (err) {
                         return done(err);
                     }
 
                     try {
-                        assert.deepEqual(replies, ['message', 'message']);
+                        assert.deepEqual(reply, 'message');
                         done();
                     } catch (err) {
                         done(err);
                     }
                 });
-        });
+            });
 
-        it('client.multi.testModule.echo.v4.testModule.echo.v4.exec should return a promise', async () => {
-            assert.deepEqual(
-                await ((client as any).multi()
+            it('client.v4.testModule.echo should return a promise', async () => {
+                assert.equal(
+                    await (client as any).v4.testModule.echo('message'),
+                    'message'
+                );
+            });
+
+            it('client.multi.testModule.echo.v4.testModule.echo.exec should call the callback', done => {
+                (client as any).multi()
                     .testModule.echo('message')
                     .v4.testModule.echo('message')
-                    .v4.exec()),
-                ['message', 'message']
-            );
+                    .exec((err?: Error, replies?: Array<string>) => {
+                        if (err) {
+                            return done(err);
+                        }
+
+                        try {
+                            assert.deepEqual(replies, ['message', 'message']);
+                            done();
+                        } catch (err) {
+                            done(err);
+                        }
+                    });
+            });
+
+            it('client.multi.testModule.echo.v4.testModule.echo.v4.exec should return a promise', async () => {
+                assert.deepEqual(
+                    await ((client as any).multi()
+                        .testModule.echo('message')
+                        .v4.testModule.echo('message')
+                        .v4.exec()),
+                    ['message', 'message']
+                );
+            });
         });
     });
 
@@ -310,7 +462,7 @@ describe('Client', () => {
                     })
                 }
             });
-    
+
             await client.connect();
 
             try {
@@ -325,7 +477,7 @@ describe('Client', () => {
             }
         });
     });
-    
+
     it('scripts', async () => {
         const client = RedisClient.create({
             scripts: {
@@ -514,7 +666,7 @@ describe('Client', () => {
 
             await subscriber.pUnsubscribe();
             await publisher.publish('channel', 'message');
-            
+
             assert.ok(channelListener1.calledOnce);
             assert.ok(channelListener2.calledTwice);
             assert.ok(patternListener.calledThrice);
